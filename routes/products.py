@@ -26,24 +26,28 @@ def get_product(product_id: int):
         detail="Product not found"
     )
 
-@router.post("/", status_code=201)        
+@router.post("/", status_code=201)
 def create_products(product: ProductCreate):
-    next_id = max(
-            (item["id"] for item in inventory),
-            default=0
-        ) + 1,
-    
-    new_product = {
-        "id": next_id,
-        "name": product.name,
-        "price": product.price,
-        "stock": product.stock
-    }
+    query = text("""
+        INSERT INTO products (name, price, stock)
+        VALUES (:name, :price, :stock)
+        RETURNING *
+    """)
 
+    with engine.begin() as connection:
+        result = connection.execute(
+            query,
+            {
+                "name": product.name,
+                "price": product.price,
+                "stock": product.stock
+            }
+        )
 
-    inventory.append(new_product)
+        new_product = result.mappings().first()
 
-    return new_product
+    return dict(new_product)
+
 
 @router.patch("/{product_id}")            
 def update_product(product_id: int, updates: ProductUpdate):
