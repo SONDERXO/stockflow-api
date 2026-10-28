@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints
 
 NonEmptyText = Annotated[
@@ -15,3 +15,7 @@ class ProductUpdate(BaseModel):
     name: NonEmptyText | None = None
     price: float | None = Field(default=None, gt=0)
     stock: int | None = Field(default=None, ge=0)
+
+class StockMovementCreate(BaseModel):
+    movement_type: Literal["IN", "OUT"]
+    quantity: int = Field(gt=0)
