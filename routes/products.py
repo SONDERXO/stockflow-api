@@ -12,7 +12,7 @@ router = APIRouter(         # Creates a router for product endpoints
 def get_product(product_id: int):
     with engine.connect() as connection:
         result = connection.execute(
-            text("SELECT * FROM products WHERE id = :product_id"),
+            text("SELECT * FROM products WHERE id = :product_id AND is_active = TRUE"),
             {"product_id": product_id}
         )
 
@@ -53,7 +53,7 @@ def create_products(product: ProductCreate):
 def update_product(product_id: int, updates: ProductUpdate):
     with engine.begin() as connection:
         result = connection.execute(
-            text("SELECT * FROM products WHERE id = :product_id"),
+            text("SELECT * FROM products WHERE id = :product_id AND is_active = TRUE"),
             {"product_id": product_id}
         )
 
@@ -101,8 +101,10 @@ def update_product(product_id: int, updates: ProductUpdate):
 @router.delete("/{product_id}")
 def delete_product(product_id: int):
     query = text("""
-        DELETE FROM products
+        UPDATE products
+        SET is_active = FALSE
         WHERE id = :product_id
+        AND is_active = TRUE
         RETURNING *
     """)
 
@@ -122,16 +124,30 @@ def delete_product(product_id: int):
     return dict(deleted_product)
 
 
+
 @router.post("/{product_id}/movements", status_code=201)
 def create_stock_movement(product_id: int, movement: StockMovementCreate):
     with engine.begin() as connection:
-        result = connection.execute(
-            text("""
+        if movement.movement_type == "IN":
+            stock_sql = """
                 UPDATE products
                 SET stock = stock + :quantity
                 WHERE id = :product_id
+                AND is_active = TRUE
                 RETURNING *
-            """),
+            """
+        else:
+            stock_sql = """
+                UPDATE products
+                SET stock = stock - :quantity
+                WHERE id = :product_id
+                AND stock >= :quantity
+                AND is_active = TRUE
+                RETURNING *
+            """
+
+        result = connection.execute(
+            text(stock_sql),
             {
                 "quantity": movement.quantity,
                 "product_id": product_id
@@ -141,9 +157,40 @@ def create_stock_movement(product_id: int, movement: StockMovementCreate):
         updated_product = result.mappings().first()
 
         if updated_product is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Product not found"
-            )
+            existing_product = connection.execute(
+                text("""
+                    SELECT id FROM products
+                    WHERE id = :product_id
+                """),
+                {"product_id": product_id}
+            ).first()
 
+            if existing_product is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Product not found"
+                )
+
+            raise HTTPException(
+                status_code=400,
+                detail="Insufficient stock"
+            )
         
+        movement_result = connection.execute(
+            text("""
+                INSERT INTO stock_movements
+                    (product_id, movement_type, quantity)
+                VALUES
+                    (:product_id, :movement_type, :quantity)
+                RETURNING *
+            """),
+            {
+                "product_id": product_id,
+                "movement_type": movement.movement_type,
+                "quantity": movement.quantity
+            }
+        )
+
+        inserted_movement = movement_result.mappings().first()
+
+        return dict(inserted_movement)
