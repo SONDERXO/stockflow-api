@@ -80,6 +80,7 @@ def update_product(product_id: int, updates: ProductUpdate):
                 price = :price,
                 stock = :stock
             WHERE id = :product_id
+            AND is_active = TRUE
             RETURNING *
         """)
 
@@ -101,6 +102,7 @@ def update_product(product_id: int, updates: ProductUpdate):
 @router.delete("/{product_id}")
 def delete_product(product_id: int):
     query = text("""
+    
         UPDATE products
         SET is_active = FALSE
         WHERE id = :product_id
@@ -161,6 +163,7 @@ def create_stock_movement(product_id: int, movement: StockMovementCreate):
                 text("""
                     SELECT id FROM products
                     WHERE id = :product_id
+                    AND is_active = TRUE
                 """),
                 {"product_id": product_id}
             ).first()
@@ -194,3 +197,61 @@ def create_stock_movement(product_id: int, movement: StockMovementCreate):
         inserted_movement = movement_result.mappings().first()
 
         return dict(inserted_movement)
+
+@router.get("/{product_id}/movements")
+def get_stock_movements(product_id: int):
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("SELECT * FROM products WHERE id = :product_id AND is_active = TRUE"),
+            {"product_id": product_id}
+        )
+
+        existing_product = result.mappings().first()
+
+        if existing_product is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found"
+            )
+
+        get_movement = connection.execute(
+            text("""
+                SELECT *
+                FROM stock_movements
+                WHERE id = :product_id
+                ORDER BY created_at DESC, id DESC
+                """), 
+                {"product_id": product_id}
+        )
+
+        movements = get_movement.mappings().all()   
+
+        movement_list = []
+
+        for movement in movements:
+            movement_list.append(dict(movement))
+
+        return movement_list
+
+@router.get("/")
+def get_all_products():
+    with engine.connect() as connection:
+        get_products = connection.execute(
+            text("""
+                SELECT *
+                FROM products
+                WHERE is_active = TRUE
+                ORDER BY id ASC
+                """)
+        )
+
+        products = get_products.mappings().all()
+
+        products_list = []
+
+        for product in products:
+            products_list.append(dict(product))
+
+        return products_list
+
+        
