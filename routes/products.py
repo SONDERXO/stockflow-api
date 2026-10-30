@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from schemas import ProductCreate, ProductUpdate, StockMovementCreate
 from sqlalchemy import text
 from database import engine
@@ -7,6 +7,30 @@ router = APIRouter(         # Creates a router for product endpoints
     prefix="/products",
     tags=["Products"]
 ) 
+
+@router.get("/search")
+def search_products(search: str):
+    search_pattern = f"%{search}%"
+    
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("""
+                SELECT * FROM products
+                WHERE is_active = TRUE
+                AND name ILIKE :search
+                ORDER BY id ASC
+            """),
+            {"search": search_pattern}
+        )
+
+        searches = result.mappings().all()
+
+        search_list = []
+        for product in searches:
+            search_list.append(dict(product))
+
+        return search_list
+
 
 @router.get("/{product_id}")            
 def get_product(product_id: int):
@@ -234,7 +258,12 @@ def get_stock_movements(product_id: int):
         return movement_list
 
 @router.get("/")
-def get_all_products():
+def get_all_products(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=100)
+):
+    offset = (page - 1) * limit
+    
     with engine.connect() as connection:
         get_products = connection.execute(
             text("""
@@ -242,7 +271,12 @@ def get_all_products():
                 FROM products
                 WHERE is_active = TRUE
                 ORDER BY id ASC
-                """)
+                LIMIT :limit OFFSET :offset
+                """),
+                {
+                    "limit": limit,
+                    "offset": offset
+                }
         )
 
         products = get_products.mappings().all()
@@ -253,5 +287,3 @@ def get_all_products():
             products_list.append(dict(product))
 
         return products_list
-
-        
